@@ -1,0 +1,3 @@
+[submodule "traces/disasm51"]
+	path = traces/disasm51
+	url = git@github.com:OlekMazur/disasm51.git
