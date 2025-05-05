@@ -87,7 +87,7 @@ def format_instruction(addr, buffer):
             argtype = ArgType.LABEL
         elif arg == ArgType.REL:    # OFFSET
             if val >= 0x80:
-                val = val = 0x100
+                val = val - 0x100
             val = addr_rel + val
             argtype = ArgType.LABEL
             if val < 0:
@@ -95,6 +95,9 @@ def format_instruction(addr, buffer):
                 argtype = None
             if arg == ArgType.IMM:
                 hints += utils.binary_hint(val)
+
+        if argtype == ArgType.DATA and val >= 0x80: # Unsure if this should also apply to BIT operands
+            hints += 'unknown SFR %02x' % val
 
         if arg == ArgType.BIT:      # BIT
             suffix = '.%d' % (val & 7)
@@ -106,15 +109,14 @@ def format_instruction(addr, buffer):
         else:
             suffix = ''
 
-        if argtype == ArgType.DATA and val >= 0x80:
-            hints += 'unknown SFR %02x' % val
-
         if argtype == ArgType.LABEL and val == addr:
             val_out = '$'   # Jump to self
         elif argtype == ArgType.LABEL:
             val_out = '%04xh' % val
         else:
             val_out = '%02x' % val
+
+        val = ibuffer.pop(0) if len(ibuffer) > 0 else 0 # Pop next byte if present
         
         # Accumulate decoded args
         args.append(val_out + suffix)
