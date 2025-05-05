@@ -38,6 +38,9 @@ instructions = Instructions()
 filename = args.filename
 skip = args.skip
 
+def hexdump(buffer):
+    return " ".join(map(lambda x: "%02x" % x, buffer))
+
 class Record:
     def __init__(self, value):
         self.address = value & 0x3fff
@@ -70,50 +73,46 @@ class Trace:
         self.instruction_start = -1
         self.instruction_sequential = False
         self.buffer = []
-        self.len = 0
+
+    def flush(self, sequential=True):
+        self.buffer = []
+        self.instruction_start = self.last_addr
+        self.instruction_sequential = sequential
 
     def iread(self, addr, data):
-        if addr == self.last_addr:  # Ignore duplicate reads
+        if addr == self.last_addr:  # Ignore duplicate reads - long running instructions can reread the same byte
             return
+
         sequential = addr == self.last_addr + 1
         seq = "SEQ" if sequential else "   "
+
         instruction = ""
         ibuffer = []
-        # If not sequential we just took a jump, so flush the disassembly buffer and start rebuilding
-        if not sequential:
-            instruction = instructions[data]
-            self.buffer = [data]
-            self.len = instruction.length
-            self.instruction_start = addr
-            self.instruction_sequential = False
-            if len(self.buffer) == self.len:
-                ibuffer = self.buffer
-                self.buffer = []
-                self.len = 0
-        # Otherwise disassemble instructions only if strictly sequential - some long running instructions cause bytes to be read multiple times
-        elif addr != self.last_addr:
-            # First byte of an instruction - probably - so decode and figure out the instruction size
-            if self.len == 0 and data in instructions:
-                instruction = instructions[data]
-                self.buffer = [data]
-                self.len = instruction.length
-                self.instruction_start = addr
-                self.instruction_sequential = True
-            # We have some instruction
-            elif len(self.buffer) > 0:
-                instruction = instructions[self.buffer[0]]
-                # Accumulate more instruction bytes
-                self.buffer.append(data)
-                # If we have the full instruction then decode it and flush the buffer
-                if len(self.buffer) == self.len:
-                    ibuffer = self.buffer
-                    self.buffer = []
-                    self.len = 0
 
-            if 0:
-                print("%s READ ROM[0x%04x]: 0x%02x - %s" % (seq, addr, data))
-            if self.len == 0:
-                print("EXECUTE 0x%04x: %s    %s %s" % (self.instruction_start, " ".join(map(lambda x: "%02x" % x, ibuffer)).ljust(9), str(instruction).ljust(40), "SEQ" if self.instruction_sequential else "   "))
+        # If not sequential we just took a jump, so flush the disassembly buffer
+        if not sequential:
+            self.flush(False)
+
+        if args.verbose:
+            print("%s READ ROM[0x%04x]: 0x%02x - %s" % (seq, addr, data))
+
+        # Buffer bytes until we have a complete instruction 
+        if addr != self.last_addr:
+            self.buffer.append(data)
+
+            # If the buffer doesn't start with a valid instruction, immediately flush it - likely at start of trace
+            if not self.buffer[0] in instructions:
+                print("FLUSH - invalid opcode %02h" % self.buffer[0])
+                self.flush(sequential)
+            else:
+                instruction = instructions[self.buffer[0]]
+                # Does buffer length match instruction lengthj
+                if len(self.buffer) > instruction.length:
+                    print("ERROR - buffer length exceeds instruction length %s" % hexdump(self.buffer))
+                if len(self.buffer) >= instruction.length:
+                    print("EXECUTE 0x%04x: %s    %s %s" % (self.instruction_start, hexdump(self.buffer).ljust(9), str(instruction).ljust(40), "SEQ" if self.instruction_sequential else "   "))
+                    self.flush(sequential)
+
         self.last_addr = addr
 
     def read(self, addr, data):
