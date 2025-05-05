@@ -22,7 +22,9 @@ top 8 bits are cycles at 100mhz since last change
 """
 
 import argparse
-from disasm51.instructions import Instructions
+import copy
+from disasm51.instructions import ArgType, Instructions
+from disasm51.utils import binary_hint
 
 parser = argparse.ArgumentParser(
     prog='8051 Trace Analyzer',
@@ -67,6 +69,63 @@ def decode(line):
     value = int(line, 16)
     return Record(value)
 
+def format_instruction(addr, buffer):
+    instruction = instructions[buffer[0]]
+    addr_rel = addr + instruction.length    # Start of next instruction
+    ibuffer = copy.deepcopy(buffer) # Working copy of the buffer
+    val = ibuffer.pop(0) # Pop bytes from the buffer as they are consumed
+
+    # Process args in sequence
+    args = []
+    hints = ''
+    for arg in instruction.args or []:
+        argtype = arg
+        if arg == ArgType.LABEL:
+            val = ((val << 8) | ibuffer.pop(0))
+        elif arg == ArgType.ADDR:
+            val = (addr_rel & 0xf800) | val | ((buffer[0] << 3) & 0x0700)
+            argtype = ArgType.LABEL
+        elif arg == ArgType.REL:
+            if val >= 0x80:
+                val = val = 0x100
+            val = addr_rel + val
+            argtype = ArgType.LABEL
+            if val < 0:
+                # Error case
+                argtype = None
+            if arg == ArgType.IMM:
+                hints += utils.binary_hint(val)
+
+        if arg == ArgType.BIT:
+            suffix = '.%d' % (val & 7)
+            if val >= 0x80:
+                val = val & 0xfb            # SFR
+            else:
+                val = 0x20 | (val >> 3)     # RAM
+            argtype = ArgType.DATA
+        else:
+            suffix = ''
+
+        if argtype == ArgType.DATA and val >= 0x80:
+            hints += 'unknown SFR %02x' % val
+
+        if argtype == ArgType.LABEL and val == addr:
+            val_out = '$'   # Jump to self
+        elif argtype == ArgType.LABEL:
+            val_out = '%04xh' % val
+        else:
+            val_out = '%02x' % val
+        
+        # Accumulate decoded args
+        args.append(val_out + suffix)
+
+    # Format using the instruction mnemonic
+    formatted = instruction.mnemonic.format(*args)
+    if hints:
+        formatted = formatted + '\t' + hints
+
+    return formatted
+
 class Trace:
     def __init__(self):
         self.last_addr = -1
@@ -110,7 +169,7 @@ class Trace:
                 if len(self.buffer) > instruction.length:
                     print("ERROR - buffer length exceeds instruction length %s" % hexdump(self.buffer))
                 if len(self.buffer) >= instruction.length:
-                    print("EXECUTE 0x%04x: %s    %s %s" % (self.instruction_start, hexdump(self.buffer).ljust(9), str(instruction).ljust(40), "SEQ" if self.instruction_sequential else "   "))
+                    print("EXECUTE 0x%04x: %s    %s %s" % (self.instruction_start, hexdump(self.buffer).ljust(9), format_instruction(self.instruction_start, self.buffer).ljust(40), "SEQ" if self.instruction_sequential else "   "))
                     self.flush(sequential)
 
         self.last_addr = addr
