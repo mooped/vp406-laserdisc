@@ -15,8 +15,8 @@
 13 26 A13
 14 29 !PSEN
 15 30 ALE
-16 17 !RD
-17 16 !WR
+16 16 !WR
+17 17 !RD
 
 top 8 bits are cycles at 100mhz since last change
 """
@@ -29,8 +29,8 @@ class Record:
         self.data = value & 0xff
         self.psen_al = value & 0x4000
         self.ale = value & 0x8000
-        self.rd_al = value & 0x10000
-        self.wr_al = value & 0x20000
+        self.wr_al = value & 0x10000
+        self.rd_al = value & 0x20000
         self.delay = (value & 0xff00000000) >> 32
 
     def __str__(self):
