@@ -72,20 +72,20 @@ def decode(line):
 def format_instruction(addr, buffer):
     instruction = instructions[buffer[0]]
     addr_rel = addr + instruction.length    # Start of next instruction
-    ibuffer = copy.deepcopy(buffer) # Working copy of the buffer
-    val = ibuffer.pop(0) # Pop bytes from the buffer as they are consumed
+    ibuffer = copy.deepcopy(buffer[1:]) # Working copy of the buffer excluding opcode
+    val = ibuffer.pop(0) if len(ibuffer) > 0 else 0 # Pop bytes from the buffer as they are consumed
 
     # Process args in sequence
     args = []
     hints = ''
     for arg in instruction.args or []:
         argtype = arg
-        if arg == ArgType.LABEL:
+        if arg == ArgType.LABEL:    # ADDR16
             val = ((val << 8) | ibuffer.pop(0))
-        elif arg == ArgType.ADDR:
+        elif arg == ArgType.ADDR:   # ADDR11
             val = (addr_rel & 0xf800) | val | ((buffer[0] << 3) & 0x0700)
             argtype = ArgType.LABEL
-        elif arg == ArgType.REL:
+        elif arg == ArgType.REL:    # OFFSET
             if val >= 0x80:
                 val = val = 0x100
             val = addr_rel + val
@@ -96,10 +96,10 @@ def format_instruction(addr, buffer):
             if arg == ArgType.IMM:
                 hints += utils.binary_hint(val)
 
-        if arg == ArgType.BIT:
+        if arg == ArgType.BIT:      # BIT
             suffix = '.%d' % (val & 7)
             if val >= 0x80:
-                val = val & 0xfb            # SFR
+                val = val & 0xf8            # SFR
             else:
                 val = 0x20 | (val >> 3)     # RAM
             argtype = ArgType.DATA
@@ -135,7 +135,7 @@ class Trace:
 
     def flush(self, sequential=True):
         self.buffer = []
-        self.instruction_start = self.last_addr
+        self.instruction_start = -1
         self.instruction_sequential = sequential
 
     def iread(self, addr, data):
@@ -145,15 +145,15 @@ class Trace:
         sequential = addr == self.last_addr + 1
         seq = "SEQ" if sequential else "   "
 
-        instruction = ""
-        ibuffer = []
-
         # If not sequential we just took a jump, so flush the disassembly buffer
         if not sequential:
             self.flush(False)
 
+        if self.instruction_start == -1:
+            self.instruction_start = addr
+
         if args.verbose:
-            print("%s READ ROM[0x%04x]: 0x%02x - %s" % (seq, addr, data))
+            print("%s READ ROM[0x%04x]: 0x%02x" % (seq, addr, data))
 
         # Buffer bytes until we have a complete instruction 
         if addr != self.last_addr:
